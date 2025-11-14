@@ -6,35 +6,37 @@ using TouchPhase = UnityEngine.InputSystem.TouchPhase;
 
 public class AssignmentScript : Singleton<AssignmentScript>
 {
-
     // Task 1: Raycasting
     public (GameObject, Vector3?) RaycastDetectionForARPlane(Vector2 screenPosition)
     {
+
+        //Get main camera
         Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return (null, null);
+        }
 
-        // First 3D point -Camera position
         Vector3 cameraPos = mainCamera.transform.position;
-
-        // Second 3D point: Screen → world conversion
-        Vector3 cameraSpacePos =
-            new Vector3(screenPosition.x, screenPosition.y, mainCamera.nearClipPlane);
-
+        Vector3 cameraSpacePos = new Vector3(screenPosition.x, screenPosition.y, mainCamera.nearClipPlane);
         Vector3 worldSpacePos = mainCamera.ScreenToWorldPoint(cameraSpacePos);
 
-        // Create the ray
-        Ray ray = new Ray(cameraPos, (worldSpacePos - cameraPos).normalized);
-
-        // Use RaycastAll so that ARPlane can still be detected behind virtual objects
+        //Construct the ray from camera through that world point
+        Vector3 rayDir = (worldSpacePos - cameraPos).normalized;
+        Ray ray = new Ray(cameraPos, rayDir);
         RaycastHit[] hits = Physics.RaycastAll(ray);
 
-        foreach (var hit in hits)
+        //Find the first hit whose object is an ARPlane
+        foreach (RaycastHit hit in hits)
         {
-            if (hit.collider != null && hit.collider.CompareTag("ARPlane"))
+            if (hit.collider != null &&
+                hit.collider.gameObject.CompareTag("ARPlane"))
             {
                 return (hit.collider.gameObject, hit.point);
             }
         }
 
+        //If no ARPlane is hit, return nulls
         return (null, null);
     }
 
@@ -42,65 +44,65 @@ public class AssignmentScript : Singleton<AssignmentScript>
     // Task 2: Geometric Registration
     public void GeometricRegistration(GameObject arObject, Vector3 hitPoint, GameObject arPlane)
     {
-        ARInteractable ar = arObject.GetComponent<ARInteractable>();
+        if (arObject == null || arPlane == null)
+            return;
 
-        // pv (local) bottom center of object
-        Vector3 p_v = ar.AnchorPointOfObject;
+        ARInteractable interact = arObject.GetComponent<ARInteractable>();
+        if (interact == null)
+            return;
 
-        // nv (local) object normal
-        Vector3 n_v = ar.NormalDirectionOfObject;
-
-        // pr (world) hit point
+        Vector3 p_v = interact.AnchorPointOfObject;
+        Vector3 n_v = interact.NormalDirectionOfObject.normalized;
         Vector3 p_r = hitPoint;
+        Vector3 n_r = arPlane.transform.up.normalized;
 
-        // nr (world) plane normal
-        Vector3 n_r = arPlane.transform.up;
+        //Store registration info for later use (dragging, rotation, scaling)
+        interact.currentAnchorPointInWorld = p_r;
+        interact.currentNormalDirectionInWorld = n_r;
+        interact.currentARPlane = arPlane;
 
-        // Store for later use (rotation & scaling)
-        ar.currentAnchorPointInWorld = p_r;
-        ar.currentNormalDirectionInWorld = n_r;
-
-        // Step 1: Rotate object so that n_v aligns with n_r
+        //Compute rotation: align object normal to plane normal
         Quaternion rotation = Quaternion.FromToRotation(n_v, n_r);
+        Vector3 position = p_r - rotation * p_v;
+
         arObject.transform.rotation = rotation;
-
-        // Step 2: Translate object so pv aligns with pr
-        Vector3 pv_world_after_rotation = arObject.transform.TransformPoint(p_v);
-        Vector3 translation = p_r - pv_world_after_rotation;
-
-        arObject.transform.position += translation;
+        arObject.transform.position = position;
     }
 
 
-    // Task 3: Object Rotation and Scaling
+    // Task 3: Object Rotation
     public void ObjectRotation(GameObject arObject, float deltaAngle)
     {
-        ARInteractable ar = arObject.GetComponent<ARInteractable>();
+        if (arObject == null) return;
 
-        // Rotation axis = plane normal
-        Vector3 axis = ar.currentNormalDirectionInWorld;
+        ARInteractable interact = arObject.GetComponent<ARInteractable>();
+        if (interact == null) return;
 
-        // Rotation center = object bottom center
-        Vector3 center = ar.currentAnchorPointInWorld;
+        Vector3 anchorWorld = interact.currentAnchorPointInWorld;
+        Vector3 axisWorld = interact.currentNormalDirectionInWorld;
 
-        // Use RotateAround for numerical stability
-        arObject.transform.RotateAround(center, axis, deltaAngle);
+        arObject.transform.RotateAround(anchorWorld, axisWorld.normalized, deltaAngle);
     }
 
+
+    // Task 3: Object Scaling
     public void ObjectScaling(GameObject arObject, float scaleRate)
     {
-        ARInteractable ar = arObject.GetComponent<ARInteractable>();
+        if (arObject == null) return;
 
-        Vector3 center = ar.currentAnchorPointInWorld;
+        ARInteractable interact = arObject.GetComponent<ARInteractable>();
+        if (interact == null) return;
 
-        // Move object so anchor is origin
-        arObject.transform.position -= center;
+        Transform t = arObject.transform;
 
-        // Apply scaling
-        arObject.transform.localScale *= scaleRate;
+        Vector3 anchorWorld = interact.currentAnchorPointInWorld;
+        Vector3 anchorLocal = t.InverseTransformPoint(anchorWorld);
 
-        // Move back to anchor
-        arObject.transform.position += center;
+        t.localScale *= scaleRate;
+
+        Vector3 newAnchorWorld = t.TransformPoint(anchorLocal);
+
+        Vector3 correction = anchorWorld - newAnchorWorld;
+        t.position += correction;
     }
-
 }
