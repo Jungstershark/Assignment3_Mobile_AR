@@ -1,0 +1,9 @@
+.vscode
+Library
+Logs
+Temp
+UserSettings
+*.csproj
+*.sln
+.vsconfig
+__MACOSX
